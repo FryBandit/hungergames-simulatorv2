@@ -1,8 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Tribute, RelationshipType, Relationship } from '../types';
 import { STATUS_CONFIG } from '../constants';
-import Modal from './Modal';
 
 interface TributeInspectorProps {
   tribute: Tribute | null;
@@ -48,6 +47,37 @@ const RelationshipBadge = ({ type, trust }: { type: RelationshipType, trust: num
 
 const TributeInspector: React.FC<TributeInspectorProps> = ({ tribute, allTributes, tributesAtLoc, onClose, onInteraction, onSelectTribute }) => {
   const [tab, setTab] = useState<'stats' | 'relationships'>('stats');
+  const [position, setPosition] = useState({ x: 20, y: 100 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef<{ x: number, y: number }>({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+     setIsDragging(true);
+     dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+  };
+
+  useEffect(() => {
+     const handleMouseMove = (e: MouseEvent) => {
+         if (isDragging) {
+             setPosition({
+                 x: e.clientX - dragStart.current.x,
+                 y: e.clientY - dragStart.current.y
+             });
+         }
+     };
+     const handleMouseUp = () => setIsDragging(false);
+
+     if (isDragging) {
+         window.addEventListener('mousemove', handleMouseMove);
+         window.addEventListener('mouseup', handleMouseUp);
+     }
+     return () => {
+         window.removeEventListener('mousemove', handleMouseMove);
+         window.removeEventListener('mouseup', handleMouseUp);
+     };
+  }, [isDragging]);
+
 
   if (!tribute) return null;
 
@@ -66,11 +96,23 @@ const TributeInspector: React.FC<TributeInspectorProps> = ({ tribute, allTribute
   };
 
   return (
-    <Modal title={`IDENT: ${tribute.name}`} onClose={onClose}>
-      <div className="space-y-4 min-h-[400px]">
+    <div 
+        ref={panelRef}
+        style={{ left: position.x, top: position.y }}
+        className="fixed w-[400px] bg-slate-900/95 border border-holo-500 rounded-lg shadow-[0_0_30px_rgba(14,165,233,0.3)] backdrop-blur-sm z-50 flex flex-col max-h-[80vh]"
+    >
+        <div 
+            className="p-3 border-b border-holo-800 flex justify-between items-center bg-slate-950 rounded-t-lg cursor-move"
+            onMouseDown={handleMouseDown}
+        >
+          <h2 className="text-holo-400 font-bold tracking-widest uppercase text-sm select-none">IDENT: {tribute.name}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white font-mono text-lg px-2">×</button>
+        </div>
+
+      <div className="p-4 overflow-y-auto flex-1">
         
         {/* Header Info */}
-        <div className="flex justify-between items-start">
+        <div className="flex justify-between items-start mb-4">
            <div className="text-sm text-slate-400 font-mono">
              <p>DISTRICT: <span className="text-white">{tribute.district}</span></p>
              <p>AGE: <span className="text-white">{tribute.age}</span></p>
@@ -89,7 +131,7 @@ const TributeInspector: React.FC<TributeInspectorProps> = ({ tribute, allTribute
            </div>
         </div>
 
-        <div className="flex border-b border-holo-800/50 mb-2">
+        <div className="flex border-b border-holo-800/50 mb-4">
             <button 
                 onClick={() => setTab('stats')}
                 className={`flex-1 py-2 text-xs font-bold uppercase ${tab === 'stats' ? 'text-holo-400 border-b-2 border-holo-400' : 'text-slate-500 hover:text-slate-300'}`}
@@ -158,7 +200,7 @@ const TributeInspector: React.FC<TributeInspectorProps> = ({ tribute, allTribute
         )}
 
         {tab === 'relationships' && (
-             <div className="animate-in fade-in duration-300 h-[300px] overflow-y-auto pr-2">
+             <div className="animate-in fade-in duration-300 h-[200px] overflow-y-auto pr-2">
                  {Object.keys(tribute.relationships).length === 0 ? (
                      <p className="text-slate-500 italic text-center text-sm mt-10">No established relationships yet.</p>
                  ) : (
@@ -242,7 +284,7 @@ const TributeInspector: React.FC<TributeInspectorProps> = ({ tribute, allTribute
           {tribute.lastAction}
         </div>
       </div>
-    </Modal>
+    </div>
   );
 };
 

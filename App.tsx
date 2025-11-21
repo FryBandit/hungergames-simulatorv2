@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [selectedTributeId, setSelectedTributeId] = useState<string | null>(null);
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const [showFallen, setShowFallen] = useState(false);
+  const [viewingMapAfterGameOver, setViewingMapAfterGameOver] = useState(false);
   
   // Start Game
   const handleStartGame = () => {
@@ -37,6 +38,7 @@ const App: React.FC = () => {
     setGameState(newGame);
     setConfigMode(false);
     setIsAutoPlaying(false);
+    setViewingMapAfterGameOver(false);
   };
 
   const handleNextPhase = useCallback(() => {
@@ -46,16 +48,16 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Auto Play Loop
+  // Correct Auto Play Loop using setTimeout to prevent drift and overlaps
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (isAutoPlaying && gameState?.phase !== GamePhase.GAME_OVER) {
-      interval = setInterval(() => {
-        handleNextPhase();
-      }, settings.gameSpeed);
-    }
-    return () => clearInterval(interval);
-  }, [isAutoPlaying, gameState?.phase, settings.gameSpeed, handleNextPhase]);
+    if (!isAutoPlaying || gameState?.phase === GamePhase.GAME_OVER) return;
+
+    const timeoutId = setTimeout(() => {
+      handleNextPhase();
+    }, settings.gameSpeed);
+
+    return () => clearTimeout(timeoutId);
+  }, [gameState, isAutoPlaying, settings.gameSpeed, handleNextPhase]);
 
   // Fallen Tribute Effect
   useEffect(() => {
@@ -156,7 +158,12 @@ const App: React.FC = () => {
                         <label className="block mb-2 text-sm uppercase text-holo-400">Lethality</label>
                         <select 
                             value={settings.lethality}
-                            onChange={(e) => setSettings({...settings, lethality: e.target.value as any})}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === 'low' || val === 'medium' || val === 'high') {
+                                    setSettings({...settings, lethality: val});
+                                }
+                            }}
                             className="w-full bg-slate-800 border border-slate-600 p-2 rounded"
                         >
                             <option value="low">Low (0.6x DMG)</option>
@@ -261,6 +268,11 @@ const App: React.FC = () => {
             <button onClick={() => setShowHelp(true)} className="text-slate-500 hover:text-white text-xs border border-slate-700 px-2 py-1 rounded z-50 relative">
                 HELP
             </button>
+            {viewingMapAfterGameOver && (
+                 <button onClick={() => setViewingMapAfterGameOver(false)} className="text-holo-400 hover:text-white text-xs border border-holo-700 px-2 py-1 rounded z-50 relative bg-holo-950/50">
+                    RETURN TO SUMMARY
+                </button>
+            )}
         </div>
 
         {/* Weather Widget */}
@@ -347,9 +359,8 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Modals / Floating Panels */}
       {selectedTribute && (
-        <div className="z-50 relative">
         <TributeInspector 
           tribute={selectedTribute} 
           allTributes={gameState.tributes}
@@ -358,7 +369,6 @@ const App: React.FC = () => {
           onInteraction={handleManualInteraction}
           onSelectTribute={handleSelectTribute}
         />
-        </div>
       )}
 
       {showFallen && gameState.deceasedQueue.length > 0 && (
@@ -385,7 +395,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {gameState.phase === GamePhase.GAME_OVER && (
+      {gameState.phase === GamePhase.GAME_OVER && !viewingMapAfterGameOver && (
          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur">
             <div className="text-center p-10 border-2 border-holo-400 rounded-xl bg-slate-900 shadow-[0_0_50px_rgba(14,165,233,0.5)]">
                <h2 className="text-4xl font-bold text-white mb-2 tracking-widest">GAME OVER</h2>
@@ -401,12 +411,20 @@ const App: React.FC = () => {
                ) : (
                  <p className="text-red-500 text-2xl font-bold">NO SURVIVORS</p>
                )}
-               <button 
-                 onClick={() => setConfigMode(true)}
-                 className="mt-8 px-8 py-3 bg-holo-600 hover:bg-holo-500 text-white rounded font-bold tracking-wider transition-colors"
-               >
-                 RETURN TO CONFIG
-               </button>
+               <div className="flex gap-4 mt-8 justify-center">
+                 <button 
+                   onClick={() => setViewingMapAfterGameOver(true)}
+                   className="px-8 py-3 border border-holo-600 hover:bg-holo-900 text-white rounded font-bold tracking-wider transition-colors"
+                 >
+                   VIEW MAP
+                 </button>
+                 <button 
+                   onClick={() => setConfigMode(true)}
+                   className="px-8 py-3 bg-holo-600 hover:bg-holo-500 text-white rounded font-bold tracking-wider transition-colors"
+                 >
+                   RETURN TO CONFIG
+                 </button>
+               </div>
             </div>
          </div>
       )}

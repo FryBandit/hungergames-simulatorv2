@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { HexTile, Tribute, BiomeType, RelationshipType } from '../types';
 import { BIOME_COLORS, BIOME_ICONS } from '../constants';
 
@@ -10,15 +10,6 @@ interface HexMapProps {
 }
 
 const HEX_SIZE = 22;
-const GRID_OFFSET_X = 400;
-const GRID_OFFSET_Y = 300;
-
-// Math to convert Axial (q, r) to Pixel (x, y)
-const hexToPixel = (q: number, r: number) => {
-  const x = HEX_SIZE * (3 / 2 * q);
-  const y = HEX_SIZE * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
-  return { x: x + GRID_OFFSET_X, y: y + GRID_OFFSET_Y };
-};
 
 const hexPoints = (x: number, y: number, size: number) => {
   const points = [];
@@ -39,6 +30,34 @@ const hasAllies = (t: Tribute) => {
 };
 
 const HexMap: React.FC<HexMapProps> = ({ map, tributes, onTributeClick }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+
+  useEffect(() => {
+    const updateSize = () => {
+        if (containerRef.current) {
+            setDimensions({
+                width: containerRef.current.offsetWidth,
+                height: containerRef.current.offsetHeight
+            });
+        }
+    };
+    
+    window.addEventListener('resize', updateSize);
+    updateSize();
+    
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  const GRID_OFFSET_X = dimensions.width / 2;
+  const GRID_OFFSET_Y = dimensions.height / 2;
+
+  // Math to convert Axial (q, r) to Pixel (x, y)
+  const hexToPixel = (q: number, r: number) => {
+    const x = HEX_SIZE * (3 / 2 * q);
+    const y = HEX_SIZE * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
+    return { x: x + GRID_OFFSET_X, y: y + GRID_OFFSET_Y };
+  };
   
   const tributesByLoc = useMemo(() => {
     const groups: Record<string, Tribute[]> = {};
@@ -66,13 +85,14 @@ const HexMap: React.FC<HexMapProps> = ({ map, tributes, onTributeClick }) => {
 
   return (
     <div 
+      ref={containerRef}
       className="w-full h-full bg-slate-950/50 border border-holo-700 rounded-lg overflow-hidden relative shadow-[0_0_15px_rgba(14,165,233,0.2)]"
       style={mapStyles}
     >
        <div className="absolute top-4 left-4 text-holo-400 font-mono text-xs z-10 pointer-events-none">
          SECTOR VIEW: 4X-ALPHA
        </div>
-      <svg className="w-full h-full" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+      <svg className="w-full h-full" viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} preserveAspectRatio="xMidYMid slice">
         <defs>
           <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
             <feGaussianBlur stdDeviation="2" result="blur" />

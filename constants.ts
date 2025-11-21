@@ -8,6 +8,31 @@ export const CAREER_DISTRICTS = [District.D1, District.D2, District.D4];
 export const STARTING_HEALTH = 100;
 export const STARTING_HUNGER = 100;
 export const STARTING_THIRST = 100;
+export const MAX_INVENTORY_SIZE = 5;
+
+export const COMBAT_CONSTANTS = {
+    BASE_DAMAGE: 5,
+    STRENGTH_MULTI: 2,
+    SPEED_MULTI: 1,
+    AGGRESSION_MULTI: 0.5,
+    ARMOR_REDUCTION: 0.7,
+    VARIANCE: 20
+};
+
+export const MOVEMENT_CONSTANTS = {
+    OSCILLATION_PENALTY: 500,
+    CROWDING_PENALTY: 20,
+    ALLY_BONUS: 30,
+    TRAP_PENALTY: 200,
+    TARGET_PENALTY_FINALE: 50,
+    TARGET_PENALTY_NORMAL: 15,
+    CENTER_PULL_FINALE: 100,
+    WATER_DESIRE: 100,
+    FOOD_DESIRE: 60,
+    WEAPON_DESIRE: 120,
+    HIDING_DESIRE: 80,
+    HAZARD_AVOIDANCE: 500
+};
 
 export const STATUS_BLEEDING = "Bleeding";
 export const STATUS_POISONED = "Poisoned";
@@ -35,7 +60,7 @@ export const WEATHER_IDLE_EVENTS: Record<WeatherType, string[]> = {
   [WeatherType.RAIN]: ["catches raindrops in their mouth.", "shivers uncontrollably.", "struggles to find dry wood.", "slips in the mud."],
   [WeatherType.STORM]: ["winces at a thunderclap.", "seeks shelter from the lightning.", "is soaked to the bone."],
   [WeatherType.SNOW]: ["tries to warm their freezing hands.", "watches their breath mist in the air.", "shakes snow off their gear."],
-  [WeatherType.FOG]: ["can barely see their own hands.", "hears strange noises in the mist.", "feels like they are being watched."],
+  [WeatherType.FOG]: ["can barely see their own hands.", "hears strange noises in the mist.", "feels faint from the heat."],
   [WeatherType.HEATWAVE]: ["sweats profusely.", "hallucinates an oasis.", "feels faint from the heat."],
 }
 

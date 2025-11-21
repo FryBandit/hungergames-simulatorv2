@@ -1,11 +1,11 @@
 
-
 import { GameState, Tribute, GamePhase, HexTile, BiomeType, Stats, Item, GameLog, HazardType, RelationshipType, Relationship, GameSettings, District, ActiveHazard, WeatherType, Trap } from "../types";
-import { DISTRICTS, GENDERS, WEAPONS, CONSUMABLES, SPONSOR_ITEMS, HAZARDS_DATA, STARTING_HEALTH, STARTING_HUNGER, STARTING_THIRST, STATUS_BLEEDING, STATUS_POISONED, STATUS_HEATSTROKE, STATUS_HYPOTHERMIA, RELATIONSHIP_THRESHOLDS, CAREER_DISTRICTS, IDLE_EVENTS, BONDING_EVENTS, BETRAYAL_EVENTS, CRAFTING_RECIPES, WEATHER_CONFIG, WEATHER_IDLE_EVENTS } from "../constants";
+import { DISTRICTS, GENDERS, WEAPONS, CONSUMABLES, SPONSOR_ITEMS, HAZARDS_DATA, STARTING_HEALTH, STARTING_HUNGER, STARTING_THIRST, STATUS_BLEEDING, STATUS_POISONED, STATUS_HEATSTROKE, STATUS_HYPOTHERMIA, RELATIONSHIP_THRESHOLDS, CAREER_DISTRICTS, IDLE_EVENTS, BONDING_EVENTS, BETRAYAL_EVENTS, CRAFTING_RECIPES, WEATHER_CONFIG, WEATHER_IDLE_EVENTS, MAX_INVENTORY_SIZE, COMBAT_CONSTANTS, MOVEMENT_CONSTANTS } from "../constants";
 
 // --- Helper Functions ---
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const generateUUID = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
 
 const generateStats = (age: number, district: District): Stats => {
   const isYoung = age <= 13;
@@ -234,7 +234,7 @@ export const generateTributes = (count: number, useAges: boolean): Tribute[] => 
 // Changed to push (Chronological order)
 const addLog = (logs: GameLog[], message: string, type: GameLog['type'] = 'info', day: number, phase: string) => {
   logs.push({
-    id: Math.random().toString(36).substr(2, 9),
+    id: generateUUID(),
     day,
     phase,
     message,
@@ -263,8 +263,8 @@ export const initializeGame = (settings: GameSettings): GameState => {
       });
   });
   
-  const startRing = settings.mapSize - 1;
-  const validStarts = tiles.filter(t => getHexDistance({q:0, r:0}, t) === startRing);
+  // Spawn Logic: Spawn at Center (0,0) and immediate neighbors (Distance <= 1)
+  const validStarts = tiles.filter(t => getHexDistance({q:0, r:0}, t) <= 1);
   
   tributes.forEach((t, i) => {
     const tile = validStarts.length > 0 ? validStarts[i % validStarts.length] : tiles[0];
@@ -293,7 +293,8 @@ const moveTributeSmart = (
     target: {q: number, r: number} | null, 
     avoidHazardBiome: BiomeType | null, 
     isFinale: boolean,
-    weather: WeatherType
+    weather: WeatherType,
+    phase: GamePhase
 ) => {
   const neighbors = getNeighbors(tribute.location, map);
   if (neighbors.length === 0) return;
@@ -301,6 +302,18 @@ const moveTributeSmart = (
   const shuffledNeighbors = neighbors.sort(() => Math.random() - 0.5);
   let bestMove = shuffledNeighbors[0];
   let bestScore = -99999;
+
+  // Bloodbath Logic
+  let bloodbathTarget: {q: number, r: number} | null = null;
+  if (phase === GamePhase.BLOODBATH) {
+      const hasWeapon = tribute.inventory.some(i => i.type === 'weapon');
+      const courage = tribute.stats.strength + tribute.stats.aggression + (hasWeapon ? 5 : 0);
+      
+      // Careers or strong tributes rush the center (Cornucopia)
+      if (courage >= 14 || CAREER_DISTRICTS.includes(tribute.district)) {
+          bloodbathTarget = { q: 0, r: 0 }; 
+      }
+  }
 
   // --- Desires ---
   const wantsWater = tribute.thirst < 50 || tribute.statusEffects.includes(STATUS_HEATSTROKE);
@@ -316,7 +329,7 @@ const moveTributeSmart = (
 
     // Anti-oscillation
     if (!isFinale && tribute.lastPos && tribute.lastPos.q === n.q && tribute.lastPos.r === n.r) {
-        score -= 500; 
+        score -= MOVEMENT_CONSTANTS.OSCILLATION_PENALTY; 
     }
 
     // Crowding
@@ -324,9 +337,10 @@ const moveTributeSmart = (
     const enemyCount = occupants.filter(o => (tribute.relationships[o.id]?.type === RelationshipType.ENEMY)).length;
     const allyCount = occupants.filter(o => (tribute.relationships[o.id]?.type === RelationshipType.ALLY || tribute.relationships[o.id]?.type === RelationshipType.CLOSE_ALLY)).length;
     
-    if (tribute.stats.aggression < 6 && !isFinale) {
-        score -= (occupants.length * 20);
-        score += (allyCount * 30);
+    // In Bloodbath, crowding is less of a deterrent if rushing
+    if (tribute.stats.aggression < 6 && !isFinale && phase !== GamePhase.BLOODBATH) {
+        score -= (occupants.length * MOVEMENT_CONSTANTS.CROWDING_PENALTY);
+        score += (allyCount * MOVEMENT_CONSTANTS.ALLY_BONUS);
     } else if (tribute.stats.aggression >= 6 && !isFinale) {
         if (occupants.length === 1) score += 20;
         else if (occupants.length > 2) score -= 10;
@@ -335,29 +349,37 @@ const moveTributeSmart = (
 
     // Trap Awareness (Intellect)
     if (tile.trap) {
-        // High INT detects traps
+        // High INT detects traps or own traps
         if (tribute.stats.intellect > 7 || tile.trap.ownerId === tribute.id) {
-            score -= 200; 
+            score -= MOVEMENT_CONSTANTS.TRAP_PENALTY; 
         }
     }
 
     // Target Logic
-    if (target) {
+    if (bloodbathTarget) {
+        // Rush the Cornucopia
+        const dist = getHexDistance(n, bloodbathTarget);
+        score -= (dist * 50); 
+    } else if (phase === GamePhase.BLOODBATH) {
+        // Run AWAY from Cornucopia
+        const distToCenter = getHexDistance(n, {q:0, r:0});
+        score += (distToCenter * 30);
+    } else if (target) {
        const dist = getHexDistance(n, target);
-       score -= dist * (isFinale ? 50 : 15); 
+       score -= dist * (isFinale ? MOVEMENT_CONSTANTS.TARGET_PENALTY_FINALE : MOVEMENT_CONSTANTS.TARGET_PENALTY_NORMAL); 
     } else if (isFinale) {
        const dist = getHexDistance(n, {q:0, r:0});
-       score -= dist * 100;
+       score -= dist * MOVEMENT_CONSTANTS.CENTER_PULL_FINALE;
     }
 
     // Desires
-    if (!isFinale) {
-        if (wantsWater && (tile.biome === BiomeType.RIVER || tile.biome === BiomeType.SWAMP)) score += 100;
-        if (wantsFood && (tile.biome === BiomeType.FOREST || tile.biome === BiomeType.MEADOW)) score += 60;
-        if (wantsWeapon && (tile.biome === BiomeType.CORNUCOPIA || tile.biome === BiomeType.RUINS)) score += 120;
-        if (wantsHiding && (tile.biome === BiomeType.FOREST || tile.biome === BiomeType.MOUNTAIN)) score += 80;
+    if (!isFinale && phase !== GamePhase.BLOODBATH) {
+        if (wantsWater && (tile.biome === BiomeType.RIVER || tile.biome === BiomeType.SWAMP)) score += MOVEMENT_CONSTANTS.WATER_DESIRE;
+        if (wantsFood && (tile.biome === BiomeType.FOREST || tile.biome === BiomeType.MEADOW)) score += MOVEMENT_CONSTANTS.FOOD_DESIRE;
+        if (wantsWeapon && (tile.biome === BiomeType.CORNUCOPIA || tile.biome === BiomeType.RUINS)) score += MOVEMENT_CONSTANTS.WEAPON_DESIRE;
+        if (wantsHiding && (tile.biome === BiomeType.FOREST || tile.biome === BiomeType.MOUNTAIN)) score += MOVEMENT_CONSTANTS.HIDING_DESIRE;
 
-        if (avoidHazardBiome && tile.biome === avoidHazardBiome) score -= 500;
+        if (avoidHazardBiome && tile.biome === avoidHazardBiome) score -= MOVEMENT_CONSTANTS.HAZARD_AVOIDANCE;
 
         // Terrain Costs
         if (tile.biome === BiomeType.MOUNTAIN) score -= 15; 
@@ -414,17 +436,17 @@ const processCombat = (
     const w1 = t1.inventory.find(i => i.type === 'weapon')?.bonus || 0;
     const w2 = t2.inventory.find(i => i.type === 'weapon')?.bonus || 0;
 
-    const s1 = (t1.stats.strength * 2) + t1.stats.speed + w1 + (t1.stats.aggression / 2) + randomInt(0, 20);
-    const s2 = (t2.stats.strength * 2) + t2.stats.speed + w2 + (t2.stats.aggression / 2) + randomInt(0, 20);
+    const s1 = (t1.stats.strength * COMBAT_CONSTANTS.STRENGTH_MULTI) + (t1.stats.speed * COMBAT_CONSTANTS.SPEED_MULTI) + w1 + (t1.stats.aggression * COMBAT_CONSTANTS.AGGRESSION_MULTI) + randomInt(0, COMBAT_CONSTANTS.VARIANCE);
+    const s2 = (t2.stats.strength * COMBAT_CONSTANTS.STRENGTH_MULTI) + (t2.stats.speed * COMBAT_CONSTANTS.SPEED_MULTI) + w2 + (t2.stats.aggression * COMBAT_CONSTANTS.AGGRESSION_MULTI) + randomInt(0, COMBAT_CONSTANTS.VARIANCE);
 
-    let dmg1 = Math.max(5, (s2 - s1) * 0.5); 
-    let dmg2 = Math.max(5, (s1 - s2) * 0.5);
+    let dmg1 = Math.max(COMBAT_CONSTANTS.BASE_DAMAGE, (s2 - s1) * 0.5); 
+    let dmg2 = Math.max(COMBAT_CONSTANTS.BASE_DAMAGE, (s1 - s2) * 0.5);
 
     dmg1 *= lethality;
     dmg2 *= lethality;
 
-    if (t1.inventory.some(i => i.id === 'armor')) dmg1 *= 0.7;
-    if (t2.inventory.some(i => i.id === 'armor')) dmg2 *= 0.7;
+    if (t1.inventory.some(i => i.id === 'armor')) dmg1 *= COMBAT_CONSTANTS.ARMOR_REDUCTION;
+    if (t2.inventory.some(i => i.id === 'armor')) dmg2 *= COMBAT_CONSTANTS.ARMOR_REDUCTION;
 
     t1.health -= dmg1;
     t2.health -= dmg2;
@@ -454,11 +476,22 @@ const processCombat = (
         }
     }
 
+    // Looting Logic
+    const lootBody = (looter: Tribute, victim: Tribute) => {
+        if (looter.isAlive && looter.inventory.length < MAX_INVENTORY_SIZE && victim.inventory.length > 0) {
+            const item = victim.inventory[0];
+            victim.inventory.shift();
+            looter.inventory.push(item);
+            addLog(logs, `${looter.name} looted ${item.name} from ${victim.name}.`, 'info', day, phase);
+        }
+    }
+
     if (t1.health <= 0 && t2.health > 0) {
         t1.isAlive = false;
         t1.causeOfDeath = `Slain by ${t2.name}`;
         t2.kills++;
         t2.hype += 5;
+        lootBody(t2, t1);
         addLog(logs, `${t1.name} was killed by ${t2.name}.`, 'death', day, phase);
         addDeathSummary(logs, t1, day, phase);
         deceasedQueue.push(t1);
@@ -468,6 +501,7 @@ const processCombat = (
         t2.causeOfDeath = `Slain by ${t1.name}`;
         t1.kills++;
         t1.hype += 5;
+        lootBody(t1, t2);
         addLog(logs, `${t2.name} was killed by ${t1.name}.`, 'death', day, phase);
         addDeathSummary(logs, t2, day, phase);
         deceasedQueue.push(t2);
@@ -492,10 +526,31 @@ const evaluateInteraction = (
     day: number, 
     phase: string, 
     weather: WeatherType,
-    allTributes: Tribute[]
+    allTributes: Tribute[],
+    settings: GameSettings
 ): 'fight' | 'bond' | 'alliance' | 'ignore' => {
     const rel = t1.relationships[t2.id] || { type: RelationshipType.NEUTRAL, trust: 0 };
     const survivors = allTributes.filter(t => t.isAlive).length;
+
+    // Bloodbath Enforced Chaos
+    if (phase === GamePhase.BLOODBATH) {
+        const currentDeaths = settings.tributeCount - survivors;
+        const desiredDeaths = settings.bloodbathDeaths;
+        // If not enough deaths yet, boost aggression to force fights
+        if (currentDeaths < desiredDeaths) {
+             if (t1.stats.aggression > 3 || Math.random() < 0.5) {
+                 // Don't fight close allies even in bloodbath
+                 if (rel.type !== RelationshipType.CLOSE_ALLY && rel.type !== RelationshipType.LOVE && rel.type !== RelationshipType.ALLY) {
+                    return 'fight';
+                 }
+             }
+        }
+    }
+
+    // Force finale showdown
+    if (day >= settings.finaleDay && survivors <= 2) {
+        return 'fight';
+    }
     
     // Betrayal
     if ((rel.type === RelationshipType.ALLY || rel.type === RelationshipType.CLOSE_ALLY) && survivors <= 4) {
@@ -629,7 +684,7 @@ const processTributeTick = (
         for (const recipe of CRAFTING_RECIPES) {
              // Check if we have ingredients
              const hasIngredients = recipe.ingredients.every(ing => tribute.inventory.some(i => i.id === ing));
-             if (hasIngredients) {
+             if (hasIngredients && tribute.inventory.length < MAX_INVENTORY_SIZE) {
                  // Remove ingredients
                  recipe.ingredients.forEach(ing => {
                      const idx = tribute.inventory.findIndex(i => i.id === ing);
@@ -707,14 +762,8 @@ const processTributeTick = (
 };
 
 export const advanceGamePhase = (state: GameState): GameState => {
-  // Deep clone state to prevent mutation issues
-  const newState = { ...state }; 
-  newState.logs = [...state.logs];
-  newState.deceasedQueue = [...state.deceasedQueue];
-  // Critical: Deep clone tributes to break references to previous state
-  newState.tributes = state.tributes.map(t => JSON.parse(JSON.stringify(t)));
-  // Clone Map to prevent mutation of history (especially for traps)
-  newState.map = state.map.map(tile => ({ ...tile, trap: tile.trap ? { ...tile.trap } : undefined }));
+  // Use structuredClone for performance and depth
+  const newState = structuredClone(state) as GameState;
   
   let nextPhase = state.phase;
   let nextDay = state.day;
@@ -770,23 +819,32 @@ export const advanceGamePhase = (state: GameState): GameState => {
               isFinale ? {q:0, r:0} : null, 
               newState.activeHazard ? newState.activeHazard.biomes[0] : null,
               isFinale,
-              newState.weather
+              newState.weather,
+              newState.phase // Pass phase for Bloodbath logic
           );
           
           // Trigger Traps on entry
           const tile = newState.map.find(x => x.q === t.location.q && x.r === t.location.r);
-          if (tile && tile.trap && tile.trap.ownerId !== t.id) {
-              t.health -= tile.trap.damage;
-              t.statusEffects.push(STATUS_BLEEDING);
-              addLog(newState.logs, `${t.name} ${tile.trap.description}!`, 'trap', nextDay, nextPhase);
-              tile.trap = undefined; // Trap consumed
+          if (tile && tile.trap) {
+              // Check friendly fire logic
+              const owner = newState.tributes.find(ot => ot.id === tile.trap!.ownerId);
+              const relType = owner ? t.relationships[owner.id]?.type : RelationshipType.NEUTRAL;
+              const isFriendly = relType === RelationshipType.ALLY || relType === RelationshipType.CLOSE_ALLY || relType === RelationshipType.LOVE;
               
-              if (t.health <= 0) {
-                  t.isAlive = false;
-                  t.causeOfDeath = "Caught in a trap";
-                  addLog(newState.logs, `${t.name} died from a trap.`, 'death', nextDay, nextPhase);
-                  addDeathSummary(newState.logs, t, nextDay, nextPhase);
-                  newState.deceasedQueue.push(t);
+              // FIX: Friendly Fire check
+              if (tile.trap.ownerId !== t.id && !isFriendly) {
+                  t.health -= tile.trap.damage;
+                  t.statusEffects.push(STATUS_BLEEDING);
+                  addLog(newState.logs, `${t.name} ${tile.trap.description}!`, 'trap', nextDay, nextPhase);
+                  tile.trap = undefined; // Trap consumed
+                  
+                  if (t.health <= 0) {
+                      t.isAlive = false;
+                      t.causeOfDeath = "Caught in a trap";
+                      addLog(newState.logs, `${t.name} died from a trap.`, 'death', nextDay, nextPhase);
+                      addDeathSummary(newState.logs, t, nextDay, nextPhase);
+                      newState.deceasedQueue.push(t);
+                  }
               }
           } else {
              t.lastAction = `Moved to (${t.location.q}, ${t.location.r})`;
@@ -824,9 +882,10 @@ export const advanceGamePhase = (state: GameState): GameState => {
               
               if (!t1.isAlive || !t2.isAlive) continue;
 
-              const interaction = evaluateInteraction(t1, t2, newState.logs, nextDay, nextPhase, newState.weather, newState.tributes);
+              const interaction = evaluateInteraction(t1, t2, newState.logs, nextDay, nextPhase, newState.weather, newState.tributes, newState.settings);
               
               if (interaction === 'fight') {
+                  // Pass lethality multiplier based on phase if desired, but settings is global
                   processCombat(t1, t2, newState.logs, nextDay, nextPhase, getLethalityMultiplier(newState.settings.lethality), newState.weather, newState.tributes, newState.deceasedQueue);
               } else if (interaction === 'bond') {
                   const event = BONDING_EVENTS[randomInt(0, BONDING_EVENTS.length - 1)];
@@ -859,8 +918,14 @@ export const advanceGamePhase = (state: GameState): GameState => {
               t.lastAction = "Idle";
           } else if (t.isAlive && t.lastAction.includes("Moved")) {
               const tile = newState.map.find(m => m.q === t.location.q && m.r === t.location.r);
-              if (tile && (tile.biome === BiomeType.FOREST || tile.biome === BiomeType.CORNUCOPIA || tile.biome === BiomeType.RUINS)) {
-                  if (Math.random() < 0.2) {
+              if (tile && (tile.biome === BiomeType.FOREST || tile.biome === BiomeType.CORNUCOPIA || tile.biome === BiomeType.RUINS) && t.inventory.length < MAX_INVENTORY_SIZE) {
+                  
+                  // FIX: Resource Scarcity
+                  let scarcityMod = 0.2; // normal
+                  if (newState.settings.resourceScarcity === 'abundant') scarcityMod = 0.5;
+                  if (newState.settings.resourceScarcity === 'starvation') scarcityMod = 0.05;
+
+                  if (Math.random() < scarcityMod) {
                       const itemPool = tile.biome === BiomeType.CORNUCOPIA ? WEAPONS : CONSUMABLES;
                       const item = itemPool[randomInt(0, itemPool.length - 1)];
                       // Clone item
@@ -884,10 +949,8 @@ export const advanceGamePhase = (state: GameState): GameState => {
 };
 
 export const manualInteraction = (action: 'alliance' | 'betray' | 'gift', actorId: string, targetId: string, state: GameState): GameState => {
-    const newState = { ...state };
-    newState.logs = [...state.logs]; 
-    newState.deceasedQueue = [...state.deceasedQueue];
-    newState.tributes = state.tributes.map(t => JSON.parse(JSON.stringify(t)));
+    // Structured Clone for performance
+    const newState = structuredClone(state) as GameState;
 
     const actor = newState.tributes.find(t => t.id === actorId);
     const target = newState.tributes.find(t => t.id === targetId);
@@ -905,7 +968,7 @@ export const manualInteraction = (action: 'alliance' | 'betray' | 'gift', actorI
         processCombat(actor, target, newState.logs, state.day, state.phase, 1.0, newState.weather, newState.tributes, newState.deceasedQueue);
     }
     if (action === 'gift') {
-        if (actor.inventory.length > 0) {
+        if (actor.inventory.length > 0 && target.inventory.length < MAX_INVENTORY_SIZE) {
             const item = actor.inventory[0];
             actor.inventory.shift();
             target.inventory.push(item);
