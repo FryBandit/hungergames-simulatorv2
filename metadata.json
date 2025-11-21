@@ -1,0 +1,5 @@
+{
+  "name": "The Arena Simulator",
+  "description": "A holographic, non-canon Hunger Games battle royale simulator with deep stats, hex-grid movement, and dynamic event generation.",
+  "requestFramePermissions": []
+}
